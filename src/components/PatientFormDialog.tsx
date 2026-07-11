@@ -37,6 +37,8 @@ const schema = z.object({
   treatment_duration: z.string().max(120).optional(),
   total_cost: z.number().min(0).max(1_000_000_000),
   amount_paid: z.number().min(0).max(1_000_000_000),
+  medication_due_date: z.string().optional().nullable(),
+  medication_renewal_status: z.enum(["active", "due"]).optional().nullable(),
 });
 
 // Format a numeric string with thousands separators. Accepts arbitrary input,
@@ -75,6 +77,8 @@ type FormState = {
   treatment_duration: string;
   total_cost: string; // formatted with commas
   amount_paid: string; // formatted with commas
+  medication_due_date: string;
+  medication_renewal_status: "active" | "due" | "";
 };
 
 const empty: FormState = {
@@ -91,6 +95,8 @@ const empty: FormState = {
   treatment_duration: "",
   total_cost: "",
   amount_paid: "",
+  medication_due_date: "",
+  medication_renewal_status: "active",
 };
 
 const draftKey = (clinicId: string, patientId?: string) =>
@@ -132,6 +138,8 @@ export const PatientFormDialog = ({ open, onOpenChange, clinicId, patient, onSav
           treatment_duration: patient.treatment_duration ?? "",
           total_cost: patient.total_cost ? Number(patient.total_cost).toLocaleString("en-US") : "",
           amount_paid: patient.amount_paid ? Number(patient.amount_paid).toLocaleString("en-US") : "",
+          medication_due_date: patient.medication_due_date ?? "",
+          medication_renewal_status: patient.medication_renewal_status ?? "",
         }
       : empty;
 
@@ -150,6 +158,7 @@ export const PatientFormDialog = ({ open, onOpenChange, clinicId, patient, onSav
   });
   const [saving, setSaving] = useState(false);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const [medicationDatePickerOpen, setMedicationDatePickerOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -187,6 +196,8 @@ export const PatientFormDialog = ({ open, onOpenChange, clinicId, patient, onSav
       treatment_duration: form.treatment_duration || undefined,
       total_cost: totalCostNum,
       amount_paid: amountPaidNum,
+      medication_due_date: form.medication_due_date || null,
+      medication_renewal_status: form.medication_renewal_status || null,
     });
     if (!parsed.success) {
       toast.error(parsed.error.issues[0].message);
@@ -200,13 +211,15 @@ export const PatientFormDialog = ({ open, onOpenChange, clinicId, patient, onSav
 
     let payload: Record<string, unknown>;
     if (opOnly) {
-      // Support: only operational fields. Financial + treatment fields are read-only.
+      // Support: only operational fields + medication fields. Financial + treatment fields are read-only.
       payload = {
         status: parsed.data.status,
         next_follow_up_date: parsed.data.next_follow_up_date || null,
         call_status: parsed.data.call_status ?? null,
         usage_habit: parsed.data.usage_habit ?? null,
         notes: parsed.data.notes ?? null,
+        medication_due_date: parsed.data.medication_due_date || null,
+        medication_renewal_status: parsed.data.medication_renewal_status || null,
       };
     } else {
       payload = {
@@ -223,6 +236,8 @@ export const PatientFormDialog = ({ open, onOpenChange, clinicId, patient, onSav
         treatment_duration: parsed.data.treatment_duration ?? "",
         total_cost: parsed.data.total_cost,
         amount_paid: parsed.data.amount_paid,
+        medication_due_date: parsed.data.medication_due_date || null,
+        medication_renewal_status: parsed.data.medication_renewal_status || null,
       };
       if (!isEdit) {
         payload.clinic_id = clinicId;
@@ -305,7 +320,7 @@ export const PatientFormDialog = ({ open, onOpenChange, clinicId, patient, onSav
                 maxLength={120}
               />
             </div>
-            <div className="sm:col-span-2">
+             <div className="sm:col-span-2">
               <Label>Next follow-up date</Label>
               <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
                 <PopoverTrigger asChild>
@@ -336,6 +351,53 @@ export const PatientFormDialog = ({ open, onOpenChange, clinicId, patient, onSav
                   />
                 </PopoverContent>
               </Popover>
+            </div>
+            
+            <div className="sm:col-span-2">
+              <Label>Medication due date</Label>
+              <Popover open={medicationDatePickerOpen} onOpenChange={setMedicationDatePickerOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className={cn(
+                      "w-full justify-start text-left font-normal h-10",
+                      !form.medication_due_date && "text-muted-foreground"
+                    )}
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {form.medication_due_date ? isoToDisplay(form.medication_due_date) : "DD/MM/YYYY"}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={form.medication_due_date ? isoToDate(form.medication_due_date) : undefined}
+                    onSelect={(d) => {
+                      if (d) {
+                        setForm({ ...form, medication_due_date: dateToIso(d) });
+                        setMedicationDatePickerOpen(false);
+                      }
+                    }}
+                    initialFocus
+                    className={cn("p-3 pointer-events-auto")}
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
+
+            <div className="sm:col-span-2">
+              <Label>Medication renewal status</Label>
+              <Select
+                value={form.medication_renewal_status || "active"}
+                onValueChange={(v) => setForm({ ...form, medication_renewal_status: v as "active" | "due" })}
+              >
+                <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="due">Due</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div className="sm:col-span-2">
               <Label>Notes</Label>
