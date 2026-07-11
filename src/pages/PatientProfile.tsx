@@ -8,7 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, Clock, User, Phone, FileText, Send, Activity, UserCog, UserCheck, Calendar } from "lucide-react";
+import { ArrowLeft, Clock, User, Phone, FileText, Send, Activity, UserCog, UserCheck, Calendar, Pill } from "lucide-react";
 import { isoToDisplay } from "@/lib/format";
 import { BrandLoader } from "@/components/BrandLoader";
 import { PatientFormDialog } from "@/components/PatientFormDialog";
@@ -193,8 +193,18 @@ export default function PatientProfile() {
                 <div className="flex items-center text-sm text-muted-foreground">
                   <Calendar className="w-4 h-4 mr-3 text-brand-500 shrink-0" />
                   <div>
-                    <span className="font-medium text-foreground">Next Follow-up: </span>
-                    {isoToDisplay(patient.next_follow_up_date)}
+                    <span className="font-medium text-foreground">Medication Due: </span>
+                    {patient.medication_due_date ? isoToDisplay(patient.medication_due_date) : "Not Set"}
+                  </div>
+                </div>
+
+                <div className="flex items-center text-sm text-muted-foreground">
+                  <Pill className="w-4 h-4 mr-3 text-brand-500 shrink-0" />
+                  <div>
+                    <span className="font-medium text-foreground">Medication Status: </span>
+                    <span className={patient.medication_renewal_status === 'due' ? 'text-red-600 font-bold capitalize' : 'text-emerald-600 font-bold capitalize'}>
+                      {patient.medication_renewal_status || "active"}
+                    </span>
                   </div>
                 </div>
 
