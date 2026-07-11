@@ -39,6 +39,8 @@ export type Patient = {
   usage_habit: "frequent" | "not_frequent" | null;
   notes: string | null;
   extra_fields: Record<string, unknown> | null;
+  medication_due_date?: string | null;
+  medication_renewal_status?: "active" | "due" | null;
 };
 
 export type StaffMember = {
