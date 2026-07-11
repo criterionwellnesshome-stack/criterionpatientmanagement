@@ -20,7 +20,7 @@ import {
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from "@/components/ui/select";
-import { Plus, Search, MessageCircle, MoreVertical, AlertTriangle, CalendarClock, Users, Download, Upload, UserCheck, X } from "lucide-react";
+import { Plus, Search, MessageCircle, MoreVertical, AlertTriangle, CalendarClock, Users, Download, Upload, UserCheck, X, Pill } from "lucide-react";
 import { isoToDisplay, displayToIso, isoToDayMonth } from "@/lib/format";
 import { ImportPatientsDialog } from "@/components/ImportPatientsDialog";
 import { trackEngagement } from "@/lib/engagement";
@@ -106,6 +106,7 @@ export default function Dashboard() {
   const today = todayISO();
   const dueToday = useMemo(() => patients.filter(p => p.status === "active" && p.next_follow_up_date === today), [patients, today]);
   const overdue = useMemo(() => patients.filter(p => p.status === "active" && p.next_follow_up_date < today), [patients, today]);
+  const renewalDue = useMemo(() => patients.filter(p => p.status === "active" && p.medication_renewal_status === "due"), [patients]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
@@ -188,6 +189,22 @@ export default function Dashboard() {
       return;
     }
     setPatients(prev => prev.map(row => row.id === p.id ? { ...row, ...(data as Patient ?? { call_status }) } : row));
+    toast.success("Updated");
+  };
+
+  const updateMedicationStatus = async (p: Patient, medication_renewal_status: Patient["medication_renewal_status"]) => {
+    const { data, error } = await supabase
+      .from("patients")
+      .update({ medication_renewal_status })
+      .eq("id", p.id)
+      .select()
+      .maybeSingle();
+    if (error) {
+      console.error(error);
+      toast.error("Could not update medication status.");
+      return;
+    }
+    setPatients(prev => prev.map(row => row.id === p.id ? { ...row, ...(data as Patient ?? { medication_renewal_status }) } : row));
     toast.success("Updated");
   };
 
@@ -290,9 +307,10 @@ export default function Dashboard() {
         </div>
       )}
       <main className="container py-6 md:py-8 space-y-6">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 md:gap-4">
           <StatCard icon={CalendarClock} label="Due today" value={dueToday.length} tone="primary" />
           <StatCard icon={AlertTriangle} label="Overdue" value={overdue.length} tone="warning" />
+          <StatCard icon={Pill} label="Medication renewal due" value={renewalDue.length} tone="danger" />
           <StatCard icon={Users} label={isSupport && !isAdmin ? "My patients" : "Total patients"} value={patients.length} tone="success" />
         </div>
 
@@ -388,6 +406,7 @@ export default function Dashboard() {
                     <th className="px-3 py-3 font-medium hidden md:table-cell">Diagnosis</th>
                     <th className="px-3 py-3 font-medium">Status</th>
                     <th className="px-3 py-3 font-medium">Call status</th>
+                    <th className="px-3 py-3 font-medium">Medication</th>
                     {canManage && <th className="px-3 py-3 font-medium hidden lg:table-cell">Assigned to</th>}
                     {!supportOnly && <th className="px-3 py-3 font-medium hidden lg:table-cell whitespace-nowrap">Updated</th>}
                     <th className="px-3 py-3"></th>
@@ -462,6 +481,20 @@ export default function Dashboard() {
                               <MessageCircle className="w-4 h-4" />
                             </Button>
                           </div>
+                        </td>
+                        <td className="px-3 py-3">
+                          <Select
+                            value={p.medication_renewal_status || "active"}
+                            onValueChange={(v) => updateMedicationStatus(p, v as "active" | "due")}
+                          >
+                            <SelectTrigger className={`h-8 w-[100px] border ${medicationTriggerClass(p.medication_renewal_status)}`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="active">Active</SelectItem>
+                              <SelectItem value="due">Due</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </td>
                         {canManage && (
                           <td className="px-3 py-3 hidden lg:table-cell">
@@ -664,12 +697,13 @@ const BulkAssignPicker = ({ staff, onPick }: { staff: StaffMember[]; onPick: (id
   );
 };
 
-const StatCard = ({ icon: Icon, label, value, tone }: { icon: any; label: string; value: number | string; tone: "primary" | "warning" | "success" | "muted" }) => {
+const StatCard = ({ icon: Icon, label, value, tone }: { icon: any; label: string; value: number | string; tone: "primary" | "warning" | "success" | "muted" | "danger" }) => {
   const toneMap = {
     primary: "bg-accent text-accent-foreground",
     warning: "bg-warning/15 text-warning",
     success: "bg-success/15 text-success",
     muted: "bg-muted text-muted-foreground",
+    danger: "bg-destructive/15 text-destructive",
   };
   return (
     <Card className="p-4 flex items-center gap-3">
@@ -703,5 +737,16 @@ const callTriggerClass = (cs: Patient["call_status"]) => {
       return "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900";
     default:
       return "";
+  }
+};
+
+const medicationTriggerClass = (status: Patient["medication_renewal_status"]) => {
+  switch (status) {
+    case "active":
+      return "bg-green-50 text-green-700 border-green-200 dark:bg-green-950/40 dark:text-green-300 dark:border-green-900";
+    case "due":
+      return "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900";
+    default:
+      return "bg-green-50 text-green-700 border-green-200 dark:bg-green-950/40 dark:text-green-300 dark:border-green-900";
   }
 };
