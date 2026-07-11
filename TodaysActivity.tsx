@@ -44,10 +44,10 @@ export default function TodaysActivity() {
     if (logData) setLogs(logData as any[]);
 
     // Fetch staff names
-    const { data: sData } = await supabase.rpc("list_staff");
+    const { data: sData } = await supabase.rpc("get_user_names");
     if (sData) {
       const map = new Map<string, string>();
-      (sData as any[]).forEach(s => map.set(s.user_id, s.display_name || s.email));
+      (sData as any[]).forEach(s => map.set(s.user_id, s.full_name || s.email));
       setStaffMap(map);
     }
     
@@ -57,6 +57,25 @@ export default function TodaysActivity() {
   useEffect(() => {
     if (hasAccess) {
       loadActivity();
+
+      const channel = supabase
+        .channel('realtime-audit-logs')
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'patient_audit_logs'
+          },
+          () => {
+            loadActivity();
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
     } else if (user) {
       navigate("/dashboard");
     }
