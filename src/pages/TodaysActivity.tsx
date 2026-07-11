@@ -32,27 +32,22 @@ export default function TodaysActivity() {
     if (!user) return;
     setLoading(true);
     
-    // Fetch logs from today
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-
     const { data: logData, error } = await supabase
       .from("patient_audit_logs")
       .select(`
         *,
         patients ( name, patient_number )
       `)
-      .gte("created_at", startOfToday.toISOString())
       .order("created_at", { ascending: false })
       .limit(200);
 
     if (logData) setLogs(logData as any[]);
 
     // Fetch staff names
-    const { data: sData } = await supabase.from("user_roles").select("*");
+    const { data: sData } = await supabase.rpc("get_user_names");
     if (sData) {
       const map = new Map<string, string>();
-      (sData as StaffMember[]).forEach(s => map.set(s.user_id, s.display_name || s.email));
+      (sData as any[]).forEach(s => map.set(s.user_id, s.full_name || s.email));
       setStaffMap(map);
     }
     
@@ -62,6 +57,25 @@ export default function TodaysActivity() {
   useEffect(() => {
     if (hasAccess) {
       loadActivity();
+
+      const channel = supabase
+        .channel('realtime-audit-logs')
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'patient_audit_logs'
+          },
+          () => {
+            loadActivity();
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
     } else if (user) {
       navigate("/dashboard");
     }
@@ -70,8 +84,11 @@ export default function TodaysActivity() {
   if (loading) return <BrandLoader message="Loading activity..." />;
   if (!hasAccess) return null;
 
-  const newPatientsCount = logs.filter(l => l.action === 'INSERT').length;
-  const updatesCount = logs.filter(l => l.action === 'UPDATE').length;
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const todaysLogs = logs.filter(l => new Date(l.created_at) >= startOfToday);
+  const newPatientsCount = todaysLogs.filter(l => l.action === 'INSERT').length;
+  const updatesCount = todaysLogs.filter(l => l.action === 'UPDATE').length;
 
   return (
     <div className="min-h-screen bg-background text-foreground pb-20">
@@ -152,7 +169,48 @@ export default function TodaysActivity() {
                       {log.action === 'UPDATE' && (
                         <div className="mt-2 text-xs bg-muted/30 border border-border/50 rounded p-2 text-muted-foreground">
                           <span className="font-semibold text-foreground/70 mb-1 block">Patient Profile Updated</span>
-                          <span className="text-xs">The system securely logged the updated profile snapshot.</span>
+                          {(() => {
+                            const changes = log.changes;
+                            if (!changes || typeof changes !== 'object') return <span className="text-xs">Patient details updated.</span>;
+                            
+                            const fieldLabels: Record<string, string> = {
+                              status: "Status",
+                              call_status: "Call Status",
+                              diagnosis: "Diagnosis",
+                              phone_number: "Phone Number",
+                              assigned_to: "Assigned Staff",
+                              treatment_notes: "Treatment Notes"
+                            };
+
+                            const changeItems: React.ReactNode[] = [];
+                            
+                            Object.keys(changes).forEach(key => {
+                              const change = changes[key];
+                              if (change && typeof change === 'object' && 'old' in change && 'new' in change) {
+                                const label = fieldLabels[key] || key;
+                                let oldVal = change.old === null ? "None" : String(change.old);
+                                let newVal = change.new === null ? "None" : String(change.new);
+                                
+                                if (key === 'assigned_to') {
+                                  oldVal = staffMap.get(change.old) || change.old || "None";
+                                  newVal = staffMap.get(change.new) || change.new || "None";
+                                }
+
+                                changeItems.push(
+                                  <div key={key} className="mt-1">
+                                    • Changed <strong className="text-foreground/80">{label}</strong> from <span className="italic">"{oldVal}"</span> to <strong className="text-emerald-700">"{newVal}"</strong>
+                                  </div>
+                                );
+                              }
+                            });
+
+                            if (changeItems.length === 0) {
+                              // If it is an older snapshot style log, print fallback
+                              return <span className="text-xs">Patient details updated.</span>;
+                            }
+
+                            return <div className="space-y-0.5 mt-1">{changeItems}</div>;
+                          })()}
                         </div>
                       )}
                     </div>
