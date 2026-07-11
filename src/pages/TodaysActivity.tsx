@@ -5,8 +5,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { TopBar } from "@/components/TopBar";
 import { Card } from "@/components/ui/card";
 import { BrandLoader } from "@/components/BrandLoader";
-import { Activity, UserPlus, FileEdit, AlertCircle, Clock } from "lucide-react";
 import { StaffMember } from "@/lib/clinic";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { cn } from "@/lib/utils";
+import { Activity, UserPlus, FileEdit, AlertCircle, Clock, Calendar as CalendarIcon } from "lucide-react";
 
 interface AuditLog {
   id: string;
@@ -24,20 +28,30 @@ export default function TodaysActivity() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [staffMap, setStaffMap] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
+  const [filterDate, setFilterDate] = useState<Date>(new Date());
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
 
   // We only allow Admins or Clinic Owners
   const hasAccess = isAdmin || isClinic;
 
-  const loadActivity = async () => {
+  const loadActivity = async (targetDate: Date) => {
     if (!user) return;
     setLoading(true);
     
+    // Calculate start and end of targetDate in local timezone
+    const startOfDay = new Date(targetDate);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(targetDate);
+    endOfDay.setHours(23, 59, 59, 999);
+
     const { data: logData, error } = await supabase
       .from("patient_audit_logs")
       .select(`
         *,
         patients ( name, patient_number )
       `)
+      .gte("created_at", startOfDay.toISOString())
+      .lte("created_at", endOfDay.toISOString())
       .order("created_at", { ascending: false })
       .limit(200);
 
@@ -56,48 +70,84 @@ export default function TodaysActivity() {
 
   useEffect(() => {
     if (hasAccess) {
-      loadActivity();
+      loadActivity(filterDate);
 
-      const channel = supabase
-        .channel('realtime-audit-logs')
-        .on(
-          'postgres_changes',
-          {
-            event: 'INSERT',
-            schema: 'public',
-            table: 'patient_audit_logs'
-          },
-          () => {
-            loadActivity();
-          }
-        )
-        .subscribe();
+      // Only listen to real-time changes if the filtered date is "today"
+      const isTodaySelected = filterDate.toDateString() === new Date().toDateString();
+      let channel: any = null;
+
+      if (isTodaySelected) {
+        channel = supabase
+          .channel('realtime-audit-logs')
+          .on(
+            'postgres_changes',
+            {
+              event: 'INSERT',
+              schema: 'public',
+              table: 'patient_audit_logs'
+            },
+            () => {
+              loadActivity(filterDate);
+            }
+          )
+          .subscribe();
+      }
 
       return () => {
-        supabase.removeChannel(channel);
+        if (channel) supabase.removeChannel(channel);
       };
     } else if (user) {
       navigate("/dashboard");
     }
-  }, [user, hasAccess]);
+  }, [user, hasAccess, filterDate]);
 
   if (loading) return <BrandLoader message="Loading activity..." />;
   if (!hasAccess) return null;
 
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
-  const todaysLogs = logs.filter(l => new Date(l.created_at) >= startOfToday);
-  const newPatientsCount = todaysLogs.filter(l => l.action === 'INSERT').length;
-  const updatesCount = todaysLogs.filter(l => l.action === 'UPDATE').length;
+  const newPatientsCount = logs.filter(l => l.action === 'INSERT').length;
+  const updatesCount = logs.filter(l => l.action === 'UPDATE').length;
 
   return (
     <div className="min-h-screen bg-background text-foreground pb-20">
-      <TopBar onHome={() => navigate("/dashboard")} title="Today's Activity" />
+      <TopBar onHome={() => navigate("/dashboard")} title="Activity Log" />
 
       <main className="max-w-5xl mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
-        <div className="flex items-center gap-3 mb-6">
-          <Activity className="w-8 h-8 text-brand-600" />
-          <h1 className="text-2xl font-bold font-heading text-brand-900 tracking-tight">Today's Activity</h1>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+          <div className="flex items-center gap-3">
+            <Activity className="w-8 h-8 text-brand-600" />
+            <h1 className="text-2xl font-bold font-heading text-brand-900 tracking-tight">Activity Log</h1>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Select date:</span>
+            <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  className={cn(
+                    "w-[240px] justify-start text-left font-normal h-10 bg-background"
+                  )}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4 text-brand-500" />
+                  {filterDate.toLocaleDateString("en-GB", { day: 'numeric', month: 'short', year: 'numeric' })}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="end">
+                <Calendar
+                  mode="single"
+                  selected={filterDate}
+                  onSelect={(d) => {
+                    if (d) {
+                      setFilterDate(d);
+                      setDatePickerOpen(false);
+                    }
+                  }}
+                  initialFocus
+                  className={cn("p-3 pointer-events-auto")}
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
         </div>
 
         {/* Top Stats */}
@@ -108,7 +158,7 @@ export default function TodaysActivity() {
             </div>
             <div>
               <div className="text-3xl font-bold text-brand-900">{newPatientsCount}</div>
-              <div className="text-sm font-medium text-muted-foreground">New Patients Added Today</div>
+              <div className="text-sm font-medium text-muted-foreground">New Patients Added</div>
             </div>
           </Card>
           
@@ -118,7 +168,7 @@ export default function TodaysActivity() {
             </div>
             <div>
               <div className="text-3xl font-bold text-brand-900">{updatesCount}</div>
-              <div className="text-sm font-medium text-muted-foreground">Patient Updates Today</div>
+              <div className="text-sm font-medium text-muted-foreground">Patient Updates</div>
             </div>
           </Card>
         </div>
