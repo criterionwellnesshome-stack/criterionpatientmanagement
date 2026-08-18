@@ -211,7 +211,7 @@ export const PatientFormDialog = ({ open, onOpenChange, clinicId, patient, onSav
 
     let payload: Record<string, unknown>;
     if (opOnly) {
-      // Support: only operational fields + medication fields. Financial + treatment fields are read-only.
+      // Support: operational fields, medication fields, and financial fields (total_cost, amount_paid).
       payload = {
         status: parsed.data.status,
         next_follow_up_date: parsed.data.next_follow_up_date || null,
@@ -220,6 +220,8 @@ export const PatientFormDialog = ({ open, onOpenChange, clinicId, patient, onSav
         notes: parsed.data.notes ?? null,
         medication_due_date: parsed.data.medication_due_date || null,
         medication_renewal_status: parsed.data.medication_renewal_status || null,
+        total_cost: parsed.data.total_cost,
+        amount_paid: parsed.data.amount_paid,
       };
     } else {
       payload = {
@@ -274,7 +276,7 @@ export const PatientFormDialog = ({ open, onOpenChange, clinicId, patient, onSav
           </DialogTitle>
           {opOnly && (
             <p className="text-xs text-muted-foreground">
-              Support access · you can update status, follow-up, call status, usage habit and notes.
+              Support access · you can update status, follow-up, call status, usage habit, notes, total cost, and amount paid.
             </p>
           )}
         </DialogHeader>
@@ -490,7 +492,6 @@ export const PatientFormDialog = ({ open, onOpenChange, clinicId, patient, onSav
                 placeholder="e.g., 200,000"
                 value={form.total_cost}
                 onChange={e => setForm({ ...form, total_cost: formatMoney(e.target.value) })}
-                disabled={opOnly}
               />
             </div>
             <div>
@@ -500,7 +501,6 @@ export const PatientFormDialog = ({ open, onOpenChange, clinicId, patient, onSav
                 placeholder="e.g., 50,000"
                 value={form.amount_paid}
                 onChange={e => setForm({ ...form, amount_paid: formatMoney(e.target.value) })}
-                disabled={opOnly}
               />
             </div>
             <div className="sm:col-span-2">
