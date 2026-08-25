@@ -66,37 +66,6 @@ export default function Auth() {
           <span className="font-display font-bold text-2xl text-center text-foreground">
             Criterion Wellness Home
           </span>
-          <Button variant="outline" className="relative cursor-pointer mb-4 w-full">
-            Bypass & Upload JSON Dump Here
-            <input type="file" accept=".json" className="absolute inset-0 opacity-0 cursor-pointer" onChange={async (e) => {
-              const file = e.target.files?.[0];
-              if (!file) return;
-              const reader = new FileReader();
-              reader.onload = async (e) => {
-                try {
-                  const data = JSON.parse(e.target?.result as string);
-                  
-                  // Fetch the new clinic ID
-                  const { data: clinicData, error: clinicErr } = await supabase.from('clinics').select('id').limit(1).maybeSingle();
-                  if (clinicErr) throw new Error("Clinic fetch error: " + clinicErr.message);
-                  if (!clinicData) throw new Error("Could not find a clinic in the database. Please ensure you ran the SQL script from Step 2.");
-                  
-                  // Clean foreign keys
-                  const cleanedData = data.map((p: any) => {
-                    const cleanP = { ...p, clinic_id: clinicData.id, assigned_to: null };
-                    return cleanP;
-                  });
-
-                  const { error } = await supabase.from('patients').insert(cleanedData);
-                  if (error) throw new Error("Insert error: " + error.message);
-                  alert("Data Imported! Now you can log in.");
-                } catch (err: any) {
-                  alert("Import failed: " + err.message);
-                }
-              };
-              reader.readAsText(file);
-            }} />
-          </Button>
         </div>
 
         <Card className="p-6 sm:p-8 shadow-elegant border-border/60">
