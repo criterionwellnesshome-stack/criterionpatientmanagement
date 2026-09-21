@@ -30,12 +30,18 @@ import { toast } from "sonner";
 
 const UNASSIGNED = "__unassigned__";
 
+// Global in-memory cache for instant navigation without re-loading
+let cachedClinic: Clinic | null = null;
+let cachedPatients: Patient[] = [];
+let cachedStaff: StaffMember[] = [];
+let hasInitiallyLoaded = false;
+
 export default function Dashboard() {
   const { user, loading, isAdmin, isSupport } = useAuth();
   const navigate = useNavigate();
-  const [clinic, setClinic] = useState<Clinic | null>(null);
-  const [patients, setPatients] = useState<Patient[]>([]);
-  const [staff, setStaff] = useState<StaffMember[]>([]);
+  const [clinic, setClinic] = useState<Clinic | null>(cachedClinic);
+  const [patients, setPatients] = useState<Patient[]>(cachedPatients);
+  const [staff, setStaff] = useState<StaffMember[]>(cachedStaff);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | Patient["status"]>("all");
   const [activeStatFilter, setActiveStatFilter] = useState<"all" | "dueToday" | "overdue" | "renewalDue">("all");
@@ -43,9 +49,18 @@ export default function Dashboard() {
   const [editing, setEditing] = useState<Patient | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Patient | null>(null);
   const [importOpen, setImportOpen] = useState(false);
-  const [busy, setBusy] = useState(true);
+  const [busy, setBusy] = useState(!hasInitiallyLoaded && cachedPatients.length === 0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkAssignOpen, setBulkAssignOpen] = useState(false);
+
+  // Helper to sync local state and global in-memory cache synchronously
+  const updatePatientsState = (updater: (prev: Patient[]) => Patient[]) => {
+    setPatients(prev => {
+      const next = updater(prev);
+      cachedPatients = next;
+      return next;
+    });
+  };
 
   // Admin-only flag for assignment UI; support users are read-mostly.
   const canManage = isAdmin; // admins (incl. clinic owner who is admin) manage assignments
@@ -56,7 +71,9 @@ export default function Dashboard() {
 
   const load = async () => {
     if (!user) return;
-    setBusy(true);
+    if (!hasInitiallyLoaded && cachedPatients.length === 0) {
+      setBusy(true);
+    }
 
     // Single-organization system: load the org clinic record. If admin has none, bootstrap one
     // so all patient flows (Add / Import / assign) work without backend changes.
@@ -78,6 +95,7 @@ export default function Dashboard() {
         c = created as Clinic;
       }
     }
+    cachedClinic = c;
     setClinic(c);
 
     // Patients are filtered by RLS:
@@ -91,15 +109,20 @@ export default function Dashboard() {
       .select("*")
       .order("created_at", { ascending: true })
       .order("patient_number", { ascending: true });
-    console.debug("[patients] fetched", p?.length ?? 0, "first:", p?.[0] ? { id: p[0].id, patient_number: p[0].patient_number, name: p[0].name } : null);
-    setPatients((p ?? []) as Patient[]);
+    
+    const freshPatients = (p ?? []) as Patient[];
+    cachedPatients = freshPatients;
+    setPatients(freshPatients);
 
     // Staff list (for assignment dropdown). Only admins can call list_staff.
     if (isAdmin) {
       const { data: s } = await supabase.rpc("list_staff");
-      setStaff((s ?? []) as StaffMember[]);
+      const freshStaff = (s ?? []) as StaffMember[];
+      cachedStaff = freshStaff;
+      setStaff(freshStaff);
     }
 
+    hasInitiallyLoaded = true;
     setBusy(false);
   };
   useEffect(() => { if (user) load(); }, [user, isAdmin]);
@@ -182,7 +205,7 @@ export default function Dashboard() {
       return;
     }
     if (status === "completed") trackEngagement(clinic?.id, "completed", p.id);
-    setPatients(prev => prev.map(row => row.id === p.id ? { ...row, ...(data as Patient ?? { status, next_follow_up_date }) } : row));
+    updatePatientsState(prev => prev.map(row => row.id === p.id ? { ...row, ...(data as Patient ?? { status, next_follow_up_date }) } : row));
     toast.success("Updated");
   };
 
@@ -198,7 +221,7 @@ export default function Dashboard() {
       toast.error("Could not update call status.");
       return;
     }
-    setPatients(prev => prev.map(row => row.id === p.id ? { ...row, ...(data as Patient ?? { call_status }) } : row));
+    updatePatientsState(prev => prev.map(row => row.id === p.id ? { ...row, ...(data as Patient ?? { call_status }) } : row));
     toast.success("Updated");
   };
 
@@ -214,7 +237,7 @@ export default function Dashboard() {
       toast.error("Could not update medication status.");
       return;
     }
-    setPatients(prev => prev.map(row => row.id === p.id ? { ...row, ...(data as Patient ?? { medication_renewal_status }) } : row));
+    updatePatientsState(prev => prev.map(row => row.id === p.id ? { ...row, ...(data as Patient ?? { medication_renewal_status }) } : row));
     toast.success("Updated");
   };
 
@@ -230,7 +253,7 @@ export default function Dashboard() {
       toast.error("Could not update assignment.");
       return;
     }
-    setPatients(prev => prev.map(r => (r.id === p.id ? { ...r, ...(data as Patient) } : r)));
+    updatePatientsState(prev => prev.map(r => (r.id === p.id ? { ...r, ...(data as Patient) } : r)));
     toast.success(assignedTo ? "Patient assigned" : "Assignment cleared");
   };
 
@@ -246,7 +269,7 @@ export default function Dashboard() {
       toast.error("Bulk assignment failed.");
       return;
     }
-    setPatients(prev => prev.map(r => (selected.has(r.id) ? { ...r, assigned_to: assignedTo } : r)));
+    updatePatientsState(prev => prev.map(r => (selected.has(r.id) ? { ...r, assigned_to: assignedTo } : r)));
     toast.success(`Assigned ${ids.length} patient${ids.length === 1 ? "" : "s"}`);
     setSelected(new Set());
     setBulkAssignOpen(false);
@@ -298,7 +321,7 @@ export default function Dashboard() {
       toast.error("Could not delete patient. Please try again.");
     } else {
       toast.success("Patient deleted");
-      setPatients(prev => prev.filter(row => row.id !== id));
+      updatePatientsState(prev => prev.filter(row => row.id !== id));
     }
     setDeleteTarget(null);
   };
@@ -626,7 +649,7 @@ export default function Dashboard() {
           open={dialogOpen} onOpenChange={setDialogOpen}
           clinicId={clinic?.id ?? editing?.clinic_id ?? ""} patient={editing}
           onSaved={(saved, previous) => {
-            setPatients(prev => {
+            updatePatientsState(prev => {
               const exists = prev.some(r => r.id === saved.id);
               return exists
                 ? prev.map(r => (r.id === saved.id ? saved : r))
@@ -639,7 +662,7 @@ export default function Dashboard() {
                 action: {
                   label: "Undo",
                   onClick: async () => {
-                    setPatients(prev => prev.map(r => (r.id === previous.id ? previous : r)));
+                    updatePatientsState(prev => prev.map(r => (r.id === previous.id ? previous : r)));
                     const { error } = await supabase
                       .from("patients")
                       .update({
