@@ -38,6 +38,7 @@ export default function Dashboard() {
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | Patient["status"]>("all");
+  const [activeStatFilter, setActiveStatFilter] = useState<"all" | "dueToday" | "overdue" | "renewalDue">("all");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Patient | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Patient | null>(null);
@@ -111,10 +112,19 @@ export default function Dashboard() {
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
     let list = patients;
+
+    if (activeStatFilter === "dueToday") {
+      list = list.filter(p => p.status === "active" && p.next_follow_up_date === today);
+    } else if (activeStatFilter === "overdue") {
+      list = list.filter(p => p.status === "active" && p.next_follow_up_date < today);
+    } else if (activeStatFilter === "renewalDue") {
+      list = list.filter(p => p.status === "active" && p.medication_renewal_status === "due");
+    }
+
     if (statusFilter !== "all") list = list.filter(p => p.status === statusFilter);
     if (q) list = list.filter(p => p.name?.toLowerCase()?.includes(q) || p.diagnosis?.toLowerCase()?.includes(q) || p.phone_number?.includes(q) || p.patient_number?.toLowerCase()?.includes(q));
     return list;
-  }, [patients, search, statusFilter]);
+  }, [patients, search, statusFilter, activeStatFilter, today]);
 
   // Keep selection in sync with filtered/visible rows.
   const allVisibleSelected = filtered.length > 0 && filtered.every(p => selected.has(p.id));
@@ -293,7 +303,7 @@ export default function Dashboard() {
     setDeleteTarget(null);
   };
 
-  if (loading || busy) return <BrandLoader label="Preparing your dashboard..." />;
+  if (loading || (busy && patients.length === 0)) return <BrandLoader label="Preparing your dashboard..." />;
 
   // Support users may not have a clinic record they can read. That's OK — we still show their assigned patients.
   const headerName = clinic?.clinic_name ?? "Criterion Wellness Home";
@@ -308,11 +318,50 @@ export default function Dashboard() {
       )}
       <main className="container py-6 md:py-8 space-y-6">
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 md:gap-4">
-          <StatCard icon={CalendarClock} label="Due today" value={dueToday.length} tone="primary" />
-          <StatCard icon={AlertTriangle} label="Overdue" value={overdue.length} tone="warning" />
-          <StatCard icon={Pill} label="Medication renewal due" value={renewalDue.length} tone="danger" />
-          <StatCard icon={Users} label={isSupport && !isAdmin ? "My patients" : "Total patients"} value={patients.length} tone="success" />
+          <StatCard
+            icon={CalendarClock}
+            label="Due today"
+            value={dueToday.length}
+            tone="primary"
+            active={activeStatFilter === "dueToday"}
+            onClick={() => setActiveStatFilter(prev => prev === "dueToday" ? "all" : "dueToday")}
+          />
+          <StatCard
+            icon={AlertTriangle}
+            label="Overdue"
+            value={overdue.length}
+            tone="warning"
+            active={activeStatFilter === "overdue"}
+            onClick={() => setActiveStatFilter(prev => prev === "overdue" ? "all" : "overdue")}
+          />
+          <StatCard
+            icon={Pill}
+            label="Medication renewal due"
+            value={renewalDue.length}
+            tone="danger"
+            active={activeStatFilter === "renewalDue"}
+            onClick={() => setActiveStatFilter(prev => prev === "renewalDue" ? "all" : "renewalDue")}
+          />
+          <StatCard
+            icon={Users}
+            label={isSupport && !isAdmin ? "My patients" : "Total patients"}
+            value={patients.length}
+            tone="success"
+            active={activeStatFilter === "all"}
+            onClick={() => setActiveStatFilter("all")}
+          />
         </div>
+
+        {activeStatFilter !== "all" && (
+          <div className="flex items-center justify-between bg-primary/10 border border-primary/20 rounded-lg px-4 py-2.5 text-sm text-primary animate-fade-in">
+            <span className="font-medium">
+              Filtered view: Showing <strong>{activeStatFilter === "dueToday" ? "Due Today" : activeStatFilter === "overdue" ? "Overdue" : "Medication Renewal Due"}</strong> patients ({filtered.length})
+            </span>
+            <Button variant="ghost" size="sm" onClick={() => setActiveStatFilter("all")} className="h-7 px-2 text-xs hover:bg-primary/20">
+              Clear filter <X className="w-3.5 h-3.5 ml-1" />
+            </Button>
+          </div>
+        )}
 
         <div className="flex flex-col gap-3">
           <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
@@ -697,7 +746,21 @@ const BulkAssignPicker = ({ staff, onPick }: { staff: StaffMember[]; onPick: (id
   );
 };
 
-const StatCard = ({ icon: Icon, label, value, tone }: { icon: any; label: string; value: number | string; tone: "primary" | "warning" | "success" | "muted" | "danger" }) => {
+const StatCard = ({
+  icon: Icon,
+  label,
+  value,
+  tone,
+  active,
+  onClick,
+}: {
+  icon: any;
+  label: string;
+  value: number | string;
+  tone: "primary" | "warning" | "success" | "muted" | "danger";
+  active?: boolean;
+  onClick?: () => void;
+}) => {
   const toneMap = {
     primary: "bg-accent text-accent-foreground",
     warning: "bg-warning/15 text-warning",
@@ -706,13 +769,22 @@ const StatCard = ({ icon: Icon, label, value, tone }: { icon: any; label: string
     danger: "bg-destructive/15 text-destructive",
   };
   return (
-    <Card className="p-4 flex items-center gap-3">
-      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${toneMap[tone]}`}>
+    <Card
+      onClick={onClick}
+      className={`p-4 flex items-center gap-3 cursor-pointer transition-all duration-200 hover:shadow-md select-none ${
+        active
+          ? "ring-2 ring-primary border-primary bg-primary/5 shadow-sm"
+          : "hover:border-border/80"
+      }`}
+    >
+      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${toneMap[tone]}`}>
         <Icon className="w-5 h-5" />
       </div>
       <div>
         <div className="text-2xl font-display font-bold leading-none">{value}</div>
-        <div className="text-xs text-muted-foreground mt-1">{label}</div>
+        <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+          {label}
+        </div>
       </div>
     </Card>
   );
